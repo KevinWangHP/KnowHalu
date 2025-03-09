@@ -15,20 +15,20 @@ parser.add_argument("--model", type=str, default='Starling-LM-7B-alpha', help="M
 parser.add_argument('--form', type=str, default='semantic', help="Form of the data")
 parser.add_argument("--topk", type=int, default=3, help="Top K results for document retrieval")
 parser.add_argument("--answer_type", type=str, default='right', choices=['right', 'hallucinated'], help="Type of answer")
-parser.add_argument("--query_selection", type=int, default=None, help="Index for the query to use")
+parser.add_argument("--query_selection", type=int, default=-1, help="Index for the query to use")
 parser.add_argument("--save_freq", type=int, default=5, help="Frequency of saving checkpoints")
 parser.add_argument("--count_limit", type=int, default=10, help="Limit for the count within the loop")
 parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
 args = parser.parse_args()
 
-df = pd.read_json('data/summarization_data.json', lines=True)
+df = pd.read_json('data/summarization_sampled_data.json', lines=True)
     
 documents = df['document'].tolist()
 summaries = df[args.answer_type + '_summary'].tolist()
 retriever = SummaryRetriever(topk = args.topk)
 
 # Read instructions
-if args.query_selection != None:
+if args.query_selection != -1:
     suffix = f'_selection{args.query_selection}'
 else:
     suffix = ''
@@ -47,7 +47,7 @@ llm = LLMCompletion(args.model)
 # Resume functionality
 file_name = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
     
-if args.query_selection != None:
+if args.query_selection != -1:
     file_name += f'_q{args.query_selection}'
 file_name += '.json'
 
@@ -104,7 +104,7 @@ for i in tqdm(range(len(documents))):
                         import pdb; pdb.set_trace()
 
                 knowledge = retriever.retrieve(documents[i], query)
-                if args.query_selection != None or len(query) < 2:
+                if args.query_selection != -1 or len(query) < 2:
                     knowledge_prompt = knowledge_instruction.format(question=query[0], knowledge=knowledge)
                 else:
                     knowledge_prompt = knowledge_instruction.format(question=f'{query[0]} [{query[1]}]', knowledge=knowledge)

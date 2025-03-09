@@ -15,7 +15,7 @@ parser.add_argument('--form', type=str, default='semantic', help="Form of the da
 parser.add_argument("--topk", type=int, default=2, help="Top K results for wiki retrieval")
 parser.add_argument("--answer_type", type=str, default='right', choices=['right', 'hallucinated'], help="Type of answer")
 parser.add_argument("--knowledge_type", type=str, default='ground', choices=['ground', 'wiki'], help="Type of knowledge source")
-parser.add_argument("--query_selection", type=int, default=None, help="Index for the query to use")
+parser.add_argument("--query_selection", type=int, default=-1, help="Index for the query to use")
 parser.add_argument("--save_freq", type=int, default=10, help="Frequency of saving checkpoints")
 parser.add_argument("--count_limit", type=int, default=10, help="Limit for the count within the loop")
 parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
@@ -27,7 +27,7 @@ questions = df['question'].tolist()
 answers = df[args.answer_type + '_answer'].tolist()
 
 # Read instructions
-if args.query_selection != None:
+if args.query_selection != -1:
     suffix = f'_selection{args.query_selection}'
 else:
     suffix = ''
@@ -50,7 +50,7 @@ else:
 file_name = f'results/qa/query_knowledge/{args.model}/{args.answer_type}_{args.knowledge_type}_{args.form}'
 if args.knowledge_type == 'wiki':
     file_name += f'_top{args.topk}'
-if args.query_selection != None:
+if args.query_selection != -1:
     file_name += f'_q{args.query_selection}'
 file_name += '.json'
 
@@ -102,7 +102,7 @@ for i in tqdm(range(len(questions))):
                     import pdb; pdb.set_trace()
             
             knowledge = ground_knowledge[i] if args.knowledge_type == 'ground' else wiki_retrieval(query, args.topk)
-            if args.query_selection != None or len(query) < 2:
+            if args.query_selection != -1 or len(query) < 2:
                 knowledge_prompt = knowledge_instruction.format(question=query[0], knowledge=knowledge)
             else:
                 knowledge_prompt = knowledge_instruction.format(question=f'{query[0]} [{query[1]}]', knowledge=knowledge)

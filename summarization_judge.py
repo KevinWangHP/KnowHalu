@@ -13,7 +13,7 @@ parser.add_argument("--model", type=str, default='Starling-LM-7B-alpha', help="M
 parser.add_argument('--form', type=str, default='semantic', help="Form of the data")
 parser.add_argument("--topk", type=int, default=3, help="Top K results for wiki retrieval")
 parser.add_argument("--answer_type", type=str, default='right', choices=['right', 'hallucinated'], help="Type of answer")
-parser.add_argument("--query_selection", type=int, default=None, help="Index for the query to use")
+parser.add_argument("--query_selection", type=int, default=-1, help="Index for the query to use")
 parser.add_argument("--save_freq", type=int, default=10, help="Frequency of saving checkpoints")
 parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
 args = parser.parse_args()
@@ -29,7 +29,7 @@ if args.eval:
 else:
     file_name = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
     
-if args.query_selection != None:
+if args.query_selection != -1:
     file_name += f'_q{args.query_selection}'
 file_name += '.json'
 judgment_file = file_name.replace('query_knowledge', 'judgment')
@@ -41,7 +41,7 @@ if not os.path.exists(directory):
 with open(file_name, 'r') as f:
     query_knowledges = json.load(f)
 
-if args.query_selection != None:
+if args.query_selection != -1:
     suffix = f'_selection{args.query_selection}'
 else:
     suffix = ''

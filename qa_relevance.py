@@ -14,7 +14,7 @@ parser.add_argument("--save_freq", type=int, default=10, help="Frequency of savi
 parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
 args = parser.parse_args()
 
-df = pd.read_json('data/qa_data.json', lines=True)
+df = pd.read_json('data/qa_sampled_data.json', lines=True)
 
 questions = df['question'].tolist()
 answers = df[args.answer_type + '_answer'].tolist()
