@@ -6,6 +6,9 @@ import argparse
 import json
 from architectures import LLMCompletion
 from utils import clean_query, split_summary_into_parts, insert_newlines
+import time
+# Mark the start time
+start_time = time.time()
 
 # Argument parsing
 parser = argparse.ArgumentParser(description="QA judgment script.")
@@ -78,3 +81,16 @@ for i in tqdm(range(len(documents))):
     if (i + 1) % args.save_freq == 0 or i == len(documents) - 1:
         with open(judgment_file, 'w') as f:
             json.dump(judgments, f)
+
+# Mark the end time
+end_time = time.time()
+# Calculate the total elapsed time in seconds
+total_seconds = int(end_time - start_time)
+# Convert seconds to hours, minutes, and seconds
+hours, remainder = divmod(total_seconds, 3600)
+minutes, seconds = divmod(remainder, 60)
+# Print all arguments in a readable format
+print("Parsed Arguments:")
+for arg, value in vars(args).items():
+    print(f"{arg}: {value}")
+print(f"Total summarization query time: {hours:02d}:{minutes:02d}:{seconds:02d}")

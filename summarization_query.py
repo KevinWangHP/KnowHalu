@@ -1,4 +1,5 @@
 import os
+os.environ['HF_HOME'] = '/bigtemp/hpwang/huggingface/cache/'
 import setGPU
 import pandas as pd
 from tqdm import tqdm
@@ -8,6 +9,9 @@ import numpy as np
 from architectures import LLMCompletion
 from utils import extract_query, split_summary_into_parts
 from retrieve import SummaryRetriever
+import time
+# Mark the start time
+start_time = time.time()
 
 # Argument parsing
 parser = argparse.ArgumentParser(description="Summary processing script.")
@@ -18,13 +22,18 @@ parser.add_argument("--answer_type", type=str, default='right', choices=['right'
 parser.add_argument("--query_selection", type=int, default=-1, help="Index for the query to use")
 parser.add_argument("--save_freq", type=int, default=5, help="Frequency of saving checkpoints")
 parser.add_argument("--count_limit", type=int, default=10, help="Limit for the count within the loop")
+parser.add_argument("--generate_model", type=str, default='Llama-3.1-8B-Instruct', help="Model name")
 parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
 args = parser.parse_args()
 
 df = pd.read_json('data/summarization_sampled_data.json', lines=True)
     
 documents = df['document'].tolist()
-summaries = df[args.answer_type + '_summary'].tolist()
+if args.generate_model == 'origin':
+    summaries = df[args.answer_type + '_summary'].tolist()
+else:
+    df_generate = pd.read_json(f'results/summarization/generated/{args.generate_model}/generated_summaries.json', lines=True)
+    summaries = df_generate['generated_summary'].tolist()
 retriever = SummaryRetriever(topk = args.topk)
 
 # Read instructions
@@ -45,7 +54,10 @@ stop_tokens = ['#Knowledge', '\n\n']
 llm = LLMCompletion(args.model)
 
 # Resume functionality
-file_name = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
+if args.generate_model == 'origin':
+    file_name = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
+else:
+    file_name = f'results/summarization/query_knowledge/{args.model}/{args.generate_model}_{args.form}_top{args.topk}'
     
 if args.query_selection != -1:
     file_name += f'_q{args.query_selection}'
@@ -134,9 +146,23 @@ for i in tqdm(range(len(documents))):
                 
         output = prompt[prompt_length:].strip()
         query_knowledge[i].append(output)
-        print(output)
+        print(output, "\n")
         
     # Save intermediate results
     if (i + 1) % args.save_freq == 0 or i == len(documents) - 1:
         with open(file_name, 'w') as f:
             json.dump(query_knowledge, f)
+
+
+# Mark the end time
+end_time = time.time()
+# Calculate the total elapsed time in seconds
+total_seconds = int(end_time - start_time)
+# Convert seconds to hours, minutes, and seconds
+hours, remainder = divmod(total_seconds, 3600)
+minutes, seconds = divmod(remainder, 60)
+# Print all arguments in a readable format
+print("Parsed Arguments:")
+for arg, value in vars(args).items():
+    print(f"{arg}: {value}")
+print(f"Total summarization query time: {hours:02d}:{minutes:02d}:{seconds:02d}")

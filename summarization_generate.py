@@ -1,36 +1,36 @@
 import os
 os.environ['HF_HOME'] = '/bigtemp/hpwang/huggingface/cache/'
-import json
 from pathlib import Path
 import torch
 import torch.nn as nn
-import numpy as np
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, pipeline, StoppingCriteria, StoppingCriteriaList
-from transformers import AutoConfig, BitsAndBytesConfig
 import pandas as pd
 from openai import OpenAI
 import argparse
+import re
 os.environ["OPENAI_API_KEY"] = 'sk-xxx'
 client = OpenAI()
-access_token = ""
-# Argument parsing
+from token import access_token
+
 parser = argparse.ArgumentParser(description="QA processing script.")
-parser.add_argument("--model", type=str, default='Llama-3.1-8B-Instruct', help="Model name")
+parser.add_argument("--model", type=str, default='internlm3-8b-instruct', help="Model name")
 args = parser.parse_args()
 
 class LLMCompletion(nn.Module):
-    def __init__(self, model_name, max_new_tokens=500, system_prompt=None):
+    def __init__(self, model_name, max_new_tokens=1000, system_prompt=None):
         super(LLMCompletion, self).__init__()
 
         self.model_name = model_name
         self.models = {
-            'llama7b': "meta-llama/Llama-2-7b-chat-hf",
+            'Llama-2-7b-chat-hf': "meta-llama/Llama-2-7b-chat-hf",
             'Starling-LM-7B-alpha': "berkeley-nest/Starling-LM-7B-alpha",
-            'Mistral': "mistralai/Mixtral-8x7B-Instruct-v0.1",
             'Meta-Llama-3-8B-Instruct': "meta-llama/Meta-Llama-3-8B-Instruct",
             'Llama-3.1-8B-Instruct': "meta-llama/Llama-3.1-8B-Instruct",
             'DeepSeek-R1-Distill-Llama-8B': "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-            'Qwen2.5-7B-Instruct': "Qwen/Qwen2.5-7B-Instruct"
+            'Qwen2.5-7B-Instruct': "Qwen/Qwen2.5-7B-Instruct",
+            'gemma-7b-it': "google/gemma-7b-it",
+            'Mistral-7B-Instruct-v0.3': "mistralai/Mistral-7B-Instruct-v0.3",
+            'internlm3-8b-instruct': "internlm/internlm3-8b-instruct"
         }
 
         if model_name in self.models:
@@ -40,30 +40,24 @@ class LLMCompletion(nn.Module):
             self.generation_config.temperature = 0.
             self.generation_config.do_sample = False
             self.generation_config.top_p = 1.0
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path, token=access_token)
-            if model_name == 'Mistral':
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    model_path, bnb_4bit_compute_dtype=torch.bfloat16, load_in_4bit=True, device_map="auto",
-                    token=access_token
-                ).eval()
-            else:
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    model_path, torch_dtype=torch.float16, device_map="auto", token=access_token
-                ).eval()
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path, token=access_token, trust_remote_code=True)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path, torch_dtype=torch.float16, device_map="auto", token=access_token, trust_remote_code=True
+            ).eval()
         else:
             raise ValueError(f"Unsupported model name: {model_name}")
 
     @torch.no_grad()
     def forward(self, prompt, stop_tokens=['\n'], split_token=None, return_prob=False):
 
-        inputs = self.tokenizer(prompt, return_tensors="pt").to('cuda')
+        inputs = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_tensors="pt").to('cuda')
         stopping_criteria = self.get_stopping_criteria(stop_tokens)
-        if self.model_name == "Llama-3.1-8B-Instruct":
+        if self.model_name in ["Llama-3.1-8B-Instruct", 'Mistral-7B-Instruct-v0.3']:
             pad_token_id = self.tokenizer.eos_token_id
         else:
             pad_token_id = self.tokenizer.pad_token_id
         output = self.model.generate(
-            **inputs,
+            input_ids=inputs,
             num_return_sequences=1,
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=pad_token_id,
@@ -73,10 +67,7 @@ class LLMCompletion(nn.Module):
             output_scores=True
         )
 
-        if split_token:
-            response = self.tokenizer.decode(output['sequences'][0], skip_special_tokens=True).split(split_token)[1]
-        else:
-            response = self.tokenizer.decode(output['sequences'][0], skip_special_tokens=True)[len(prompt):]
+        response = self.tokenizer.decode(output['sequences'][0], skip_special_tokens=True)
         return response
 
     def get_stopping_criteria(self, stop_tokens):
@@ -159,19 +150,35 @@ task = "summarization"
 output_dir = Path(f'results/{task}/generated/{args.model}')
 output_dir.mkdir(parents=True, exist_ok=True)
 
-llm = LLMCompletion(args.model)
-# 4. Generate summaries with concise prompt
-
 generated_summaries = []
+
+llm = LLMCompletion(args.model)
+
+
 for doc in df['document']:
-    prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": f"Without any explanation, only give a concise and comprehensive summary of this article directly. (100 words max) Article: {doc}"},
+    ]
 
-    You are a helpful assistant<|eot_id|><|start_header_id|>user<|end_header_id|>
 
-    Give a concise and comprehensive summary of this article directly. (100 words max) Article: {doc}<|eot_id|><|start_header_id|>assistant<|end_header_id|>Summary:
-
-    """
-    response = llm(prompt, ["\n", "\n\n"], split_token="Summary:\n")
+    if args.model in ["Llama-3.1-8B-Instruct", "Qwen2.5-7B-Instruct", "internlm3-8b-instruct"]:
+        response = llm(messages, ["\n\n\n"])
+        response = response.split("assistant\n")[1]
+    elif args.model == "DeepSeek-R1-Distill-Llama-8B":
+        response = llm(messages, ["\n\n\n"])
+        # Extracted text
+        response =  response.split("</think>")[1]
+    elif args.model in ["gemma-7b-it", "Mistral-7B-Instruct-v0.3"]:
+        messages = messages[1:]
+        response = llm(messages, ["\n\n\n"])
+        # Extracted text
+        response =  response.strip().split("\n")[-1]
+    elif args.model == "Llama-2-7b-chat-hf":
+        response = llm(messages, ["\n\n\n"])
+        response = response
+    else:
+        raise NotImplementedError
     generated_summaries.append(response.strip())
     print(response.strip(), "\n")
 
