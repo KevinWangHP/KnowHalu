@@ -1,4 +1,5 @@
 import os
+os.environ['HF_HOME'] = '/bigtemp/hpwang/huggingface/cache/'
 import setGPU
 import pandas as pd
 from tqdm import tqdm
@@ -14,23 +15,25 @@ start_time = time.time()
 parser = argparse.ArgumentParser(description="QA judgment script.")
 parser.add_argument("--model", type=str, default='Starling-LM-7B-alpha', help="Model name")
 parser.add_argument('--form', type=str, default='semantic', help="Form of the data")
-parser.add_argument("--topk", type=int, default=3, help="Top K results for wiki retrieval")
-parser.add_argument("--answer_type", type=str, default='right', choices=['right', 'hallucinated'], help="Type of answer")
+parser.add_argument("--topk", type=int, default=2, help="Top K results for wiki retrieval")
+parser.add_argument("--answer_type", type=str, default='right', help="Type of answer")
 parser.add_argument("--query_selection", type=int, default=-1, help="Index for the query to use")
 parser.add_argument("--save_freq", type=int, default=10, help="Frequency of saving checkpoints")
+parser.add_argument("--generate_model", type=str, default='Llama-3.1-8B-Instruct', help="Model name")
 parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
 args = parser.parse_args()
 
-df = pd.read_json('data/summarization_data.json', lines=True)
+df = pd.read_json('data/summarization_sampled_data.json', lines=True)
     
 documents = df['document'].tolist()
-summaries = df[args.answer_type + '_summary'].tolist()
-
-# Load query knowledge from the stored file
-if args.eval:
-    file_name = f'results/summarization/query_knowledge_eval/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
-else:
-    file_name = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
+# summaries = df[args.answer_type + '_summary'].tolist()
+summaries = pd.read_json(f'./results/summarization/generated/{args.answer_type}/generated_summaries.json', lines=True)
+summaries = summaries["generated_summary"]
+# # Load query knowledge from the stored file
+# if args.eval:
+#     file_name = f'results/summarization/query_knowledge_eval/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
+# else:
+file_name = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top{args.topk}'
     
 if args.query_selection != -1:
     file_name += f'_q{args.query_selection}'
@@ -93,4 +96,4 @@ minutes, seconds = divmod(remainder, 60)
 print("Parsed Arguments:")
 for arg, value in vars(args).items():
     print(f"{arg}: {value}")
-print(f"Total summarization query time: {hours:02d}:{minutes:02d}:{seconds:02d}")
+print(f"Total summarization judge time: {hours:02d}:{minutes:02d}:{seconds:02d}")

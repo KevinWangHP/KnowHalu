@@ -1,41 +1,45 @@
 import os
-
 os.environ['HF_HOME'] = '/bigtemp/hpwang/huggingface/cache/'
 from transformers import AutoModelForSequenceClassification
 import pandas as pd
 from tqdm import tqdm
 import argparse
 import json
-from architectures import LLMCompletion
 import numpy as np
 from matplotlib import pyplot as plt
-
+import torch
+import time
+start_time = time.time()
 # Argument parsing
 parser = argparse.ArgumentParser(description="QA judgment script.")
 parser.add_argument("--model", type=str, default='Starling-LM-7B-alpha', help="Model name")
 parser.add_argument('--form', type=str, default='semantic', help="Form of the data")
-parser.add_argument("--answer_type", type=str, default='right', choices=['right', 'hallucinated'], help="Type of answer")
-parser.add_argument("--knowledge_type", type=str, default='ground', choices=['ground', 'wiki'], help="Type of knowledge source")
+parser.add_argument("--answer_type", type=str, default='DeepSeek-R1-Distill-Llama-8B', help="Type of answer")
 parser.add_argument("--query_selection", type=int, default=-1, help="Index for the query to use")
+parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
 args = parser.parse_args()
 
-df = pd.read_json('data/summarization_sampled_data.json', lines=True)
+origin_df = pd.read_json('data/summarization_sampled_data.json', lines=True)
+if args.answer_type in ['right', 'hallucinated']:
+    judge_summaries = origin_df[f'{args.answer_type}_summary']
+else:
+    df = pd.read_json(f'./results/summarization/generated/{args.answer_type}/generated_summaries.json', lines=True)
+    # Load query knowledge from the stored file
+    judge_summaries = df["generated_summary"]
 
-# Load query knowledge from the stored file
-knowledge_right_file = f'results/summarization/query_knowledge/Starling-LM-7B-alpha/right_triplet_top2.json'
-with open(knowledge_right_file, 'r') as f:
+
+document = origin_df["document"].tolist()
+
+knowledge_file = f'results/summarization/query_knowledge/{args.model}/{args.answer_type}_{args.form}_top2.json'
+with open(knowledge_file, 'r') as f:
     query_knowledges = json.load(f)
-knowledge_hallucinated_file = f'results/summarization/query_knowledge/Starling-LM-7B-alpha/hallucinated_triplet_top2.json'
-with open(knowledge_right_file, 'r') as f:
-    query_knowledges_1 = json.load(f)
+
 
 # Extract right and hallucinated answers
 # right_pairs = list(zip(df['document'].tolist(), df['right_summary'].tolist()))
 # hallucinated_pair = list(zip(df['document'].tolist(), df['hallucinated_summary'].tolist()))
 
-right_pairs = list(zip(query_knowledges, df['right_summary'].tolist()))
-hallucinated_pair = list(zip(query_knowledges_1, df['hallucinated_summary'].tolist()))
-
+knowledge_pairs = list(zip(query_knowledges, document, judge_summaries.tolist()))
 # pairs = [ # Test data, List[Tuple[str, str]]
 #     ("The capital of France is Berlin.", "The capital of France is Paris."), # factual but hallucinated
 #     ('I am in California', 'I am in United States.'), # Consistent
@@ -51,61 +55,52 @@ model = AutoModelForSequenceClassification.from_pretrained(
     'vectara/hallucination_evaluation_model', trust_remote_code=True)
 
 
-def predict_score(pairs, batch_size=10):
+def predict_score(pairs):
     print("Predicting Pairs......")
+    tensor_list = []
+    for i in tqdm(range(len(pairs))):
+        exp = pairs[i]  # Process in batches of 2500
+        # if "wrong detail" in " ".join(exp[0]):
+        #     tensor_list.append(torch.tensor((0, ), dtype=torch.float))
+        # else:
+        #     res_cur = model.predict([(exp[1], exp[2])])  # Ensure model.predict() is used instead of direct model call
+        #     tensor_list.append(res_cur)
+        flag = 0
+        if "wrong detail" in " ".join(exp[0]):
+            flag = 1
+        res_cur = model.predict([(exp[1], exp[2])])  # Ensure model.predict() is used instead of direct model call
+        if flag:
+            res_cur = res_cur / 2
+        tensor_list.append(res_cur)
 
-    total_correct = 0
-    total_processed = 0
 
-    for i in range(0, len(pairs), batch_size):
-        batch = pairs[i:i + batch_size]  # Process in batches of 2500
-        res = model.predict(batch)  # Ensure model.predict() is used instead of direct model call
+    # Concatenate along dimension 0 to form a single 1D tensor of size 10*n
+    result = torch.cat(tensor_list)
+    return result
 
-        for j, score in enumerate(res):
-            if score > 0.5:
-                total_correct += 1  # Correct if score > 0.5
-        total_processed += len(res)
 
-    overall_accuracy = total_correct / total_processed if total_processed > 0 else 0
-    print(f"Overall Accuracy: {total_correct} / {total_processed} = {overall_accuracy:.4f}")
+res = predict_score(knowledge_pairs)
+total_correct = (res > 0.5).sum()
+print(args.answer_type)
+print(f"Accuracy: {total_correct} / {len(res)} = {total_correct / len(res):.3f}")
+print(f"Hallucination Score: {1 - res.mean()}")
 
-    return total_correct, total_processed
+# Convert the tensor to a Python list
+result_list = res.tolist()
 
-right_pred, right_total = predict_score(right_pairs)
-hallucinated_pred, hallucinated_total = predict_score(hallucinated_pair)
+# Save the list to a JSON file
+json_filename = f"./results/summarization/judgment/{args.model}/{args.answer_type}_{args.form}_top2_curve.json"
+with open(json_filename, "w") as json_file:
+    json.dump(result_list, json_file, indent=4)
 
-hallucinated_values = [hallucinated_pred, 0, hallucinated_total-hallucinated_pred]
-right_values =[right_pred, 0, right_total-right_pred]
-total_h = hallucinated_total
-total_r = right_total
+print(f"Result saved to {json_filename}")
 
-categories = ["Correct", "Inconclusive", "Incorrect"]
-x = np.arange(len(categories))  # Label locations
+# Mark the end time
+end_time = time.time()
+# Calculate the total elapsed time in seconds
+total_seconds = int(end_time - start_time)
+# Convert seconds to hours, minutes, and seconds
+hours, remainder = divmod(total_seconds, 3600)
+minutes, seconds = divmod(remainder, 60)
 
-hallucinated_percentages = [(v / total_h) * 100 if total_h > 0 else 0 for v in hallucinated_values]
-right_percentages = [(v / total_r) * 100 if total_r > 0 else 0 for v in right_values]
-
-# Plot Bar Chart
-fig, ax = plt.subplots(figsize=(8, 5))
-bar_width = 0.35
-
-rects1 = ax.bar(x - bar_width/2, hallucinated_percentages, bar_width, label="Hallucinated")
-rects2 = ax.bar(x + bar_width/2, right_percentages, bar_width, label="Right")
-
-# Annotate bars with their percentages
-for rect, perc in zip(rects1, hallucinated_percentages):
-    height = rect.get_height()
-    ax.text(rect.get_x() + rect.get_width()/2, height, f'{perc:.1f}%', ha='center', va='bottom')
-
-for rect, perc in zip(rects2, right_percentages):
-    height = rect.get_height()
-    ax.text(rect.get_x() + rect.get_width()/2, height, f'{perc:.1f}%', ha='center', va='bottom')
-
-ax.set_xlabel("Judgment Categories")
-ax.set_ylabel("Percentage (%)")
-ax.set_title("HHEM Comparison of Judgment Percentages (Hallucinated vs Right)")
-ax.set_xticks(x)
-ax.set_xticklabels(categories)
-ax.legend()
-plt.savefig("./results/figure/HHEM_Summarization.png")
-
+print(f"Total HHEM judge time: {hours:02d}:{minutes:02d}:{seconds:02d}")

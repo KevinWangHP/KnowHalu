@@ -10,8 +10,8 @@ import argparse
 import re
 os.environ["OPENAI_API_KEY"] = 'sk-xxx'
 client = OpenAI()
-from token import access_token
-
+from local_token import access_token
+from tqdm import tqdm
 parser = argparse.ArgumentParser(description="QA processing script.")
 parser.add_argument("--model", type=str, default='internlm3-8b-instruct', help="Model name")
 args = parser.parse_args()
@@ -23,14 +23,17 @@ class LLMCompletion(nn.Module):
         self.model_name = model_name
         self.models = {
             'Llama-2-7b-chat-hf': "meta-llama/Llama-2-7b-chat-hf",
-            'Starling-LM-7B-alpha': "berkeley-nest/Starling-LM-7B-alpha",
-            'Meta-Llama-3-8B-Instruct': "meta-llama/Meta-Llama-3-8B-Instruct",
+            # 'Starling-LM-7B-alpha': "berkeley-nest/Starling-LM-7B-alpha",
+            # 'Meta-Llama-3-8B-Instruct': "meta-llama/Meta-Llama-3-8B-Instruct",
             'Llama-3.1-8B-Instruct': "meta-llama/Llama-3.1-8B-Instruct",
             'DeepSeek-R1-Distill-Llama-8B': "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
             'Qwen2.5-7B-Instruct': "Qwen/Qwen2.5-7B-Instruct",
             'gemma-7b-it': "google/gemma-7b-it",
             'Mistral-7B-Instruct-v0.3': "mistralai/Mistral-7B-Instruct-v0.3",
-            'internlm3-8b-instruct': "internlm/internlm3-8b-instruct"
+            'internlm3-8b-instruct': "internlm/internlm3-8b-instruct",
+            'Qwen2.5-0.5B-Instruct': "Qwen/Qwen2.5-0.5B-Instruct",
+            'Qwen2.5-1.5B-Instruct': "Qwen/Qwen2.5-1.5B-Instruct",
+            'Qwen2.5-3B-Instruct': "Qwen/Qwen2.5-3B-Instruct",
         }
 
         if model_name in self.models:
@@ -155,14 +158,14 @@ generated_summaries = []
 llm = LLMCompletion(args.model)
 
 
-for doc in df['document']:
+for doc in tqdm(df['document']):
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": f"Without any explanation, only give a concise and comprehensive summary of this article directly. (100 words max) Article: {doc}"},
     ]
 
 
-    if args.model in ["Llama-3.1-8B-Instruct", "Qwen2.5-7B-Instruct", "internlm3-8b-instruct"]:
+    if args.model in ["Llama-3.1-8B-Instruct"] or "Qwen" in args.model:
         response = llm(messages, ["\n\n\n"])
         response = response.split("assistant\n")[1]
     elif args.model == "DeepSeek-R1-Distill-Llama-8B":
@@ -176,7 +179,10 @@ for doc in df['document']:
         response =  response.strip().split("\n")[-1]
     elif args.model == "Llama-2-7b-chat-hf":
         response = llm(messages, ["\n\n\n"])
-        response = response
+        response = response.split("[/INST]")[1]
+    elif args.model == "internlm3-8b-instruct":
+        response = llm(messages, ["\n\n\n"])
+        response = response.strip().split("\n")[-1]
     else:
         raise NotImplementedError
     generated_summaries.append(response.strip())

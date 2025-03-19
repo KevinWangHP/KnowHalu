@@ -22,11 +22,11 @@ args = parser.parse_args()
 df = pd.read_json('data/qa_sampled_data.json', lines=True)
 
 # Load query knowledge from the stored file
-knowledge_right_file = f'results/qa/query_knowledge/Starling-LM-7B-alpha/right_ground_triplet.json'
+knowledge_right_file = f'results/qa/query_knowledge/Starling-LM-7B-alpha/right_ground_semantic.json'
 with open(knowledge_right_file, 'r') as f:
     query_knowledges = json.load(f)
-knowledge_hallucinated_file = f'results/qa/query_knowledge/Starling-LM-7B-alpha/hallucinated_ground_triplet.json'
-with open(knowledge_right_file, 'r') as f:
+knowledge_hallucinated_file = f'results/qa/query_knowledge/Starling-LM-7B-alpha/hallucinated_ground_semantic.json'
+with open(knowledge_hallucinated_file, 'r') as f:
     query_knowledges_1 = json.load(f)
 
 # Extract right and hallucinated answers
